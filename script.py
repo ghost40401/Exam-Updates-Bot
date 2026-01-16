@@ -137,27 +137,27 @@ def send_embed(src, title, url, date):
 def main():
     state = load_state()
 
+    BASELINE_LIMIT = 5  # per source
+    
     for name, src in SOURCES.items():
         state["posted"].setdefault(name, [])
 
         pdfs = fetch_pdfs(src)
         pdfs.sort(key=lambda x: x[2] or datetime.min)
-
-       BASELINE_LIMIT = 5  # per source
-baseline_batch = pdfs[-BASELINE_LIMIT:]
-
-for url, title, date in pdfs:
-    if not state["baseline_done"]:
-        if (url, title, date) not in baseline_batch:
+        
+        baseline_batch = pdfs[-BASELINE_LIMIT:]
+        
+        for url, title, date in pdfs:
+            if not state["baseline_done"]:
+                if (url, title, date) not in baseline_batch:
+                    state["posted"][name].append(url)
+                    continue
+            else:
+                if url in state["posted"][name]:
+                    continue
+                    
+            send_embed(src, title, url, date)
             state["posted"][name].append(url)
-            continue
-    else:
-        if url in state["posted"][name]:
-            continue
-
-    send_embed(src, title, url, date)
-    state["posted"][name].append(url)
-
 
     state["baseline_done"] = True
     save_state(state)
