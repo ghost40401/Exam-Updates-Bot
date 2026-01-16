@@ -70,6 +70,8 @@ def load_state():
     if "posted" not in data:
         return {"posted": data, "baseline_done": False}
 
+    state.setdefault("baseline_done", {})
+
     return data
 
 
@@ -88,32 +90,57 @@ def clean_title_from_url(url):
     )
 
 
-def fetch_pdfs(source):
-    r = requests.get(source["url"], timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
+def fetch_pdfs(src):
+    all_pdfs = []
+    page = 1
 
-    found = []
+    while True:
+        url = src["url"]
+        if page > 1:
+            url = url.rstrip("/") + f"/page/{page}/"
 
-    for a in soup.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
-        pdf_url = urljoin(source["url"], a["href"])
-        title = a.get_text(strip=True)
-        if not title or len(title) < 6:
-            title = clean_title_from_url(pdf_url)
+        r = requests.get(url, timeout=20)
+        if r.status_code != 200:
+            break
 
-        date = None
-        try:
-            head = requests.head(pdf_url, timeout=10)
-            lm = head.headers.get("Last-Modified")
-            if lm:
-                date = datetime.strptime(
-                    lm, "%a, %d %b %Y %H:%M:%S %Z"
-                )
-        except:
-            pass
+        soup = BeautifulSoup(r.text, "html.parser")
+        found_any = False
 
-        found.append((pdf_url, title, date))
+        for a in soup.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
+            found_any = True
+            pdf_url = urljoin(url, a["href"])
+            title = a.get_text(strip=True)
+            if not title or len(title) < 6:
+                title = clean_title_from_url(pdf_url)
 
-    return found
+            date = None
+            try:
+                head = requests.head(pdf_url, timeout=10)
+                lm = head.headers.get("Last-Modified")
+                if lm:
+                    date = datetime.strptime(
+                        lm, "%a, %d %b %Y %H:%M:%S %Z"
+                    )
+            except:
+                pass
+
+            all_pdfs.append((pdf_url, title, date))
+
+        if not found_any:
+            break
+
+        page += 1
+
+    # de-duplicate while preserving order
+    seen = set()
+    unique = []
+    for item in all_pdfs:
+        if item[0] not in seen:
+            seen.add(item[0])
+            unique.append(item)
+
+    return unique
+
 
 
 def send_embed(src, title, url, date):
@@ -156,7 +183,7 @@ def main():
         baseline_batch = pdfs[-BASELINE_LIMIT:]
         
         for url, title, date in pdfs:
-            if not state["baseline_done"]:
+            if not state["baseline_done"].get(name, False):
                 if (url, title, date) not in baseline_batch:
                     state["posted"][name].append(url)
                     continue
@@ -166,6 +193,8 @@ def main():
                     
             send_embed(src, title, url, date)
             state["posted"][name].append(url)
+
+    state["baseline_done"][name] = True
 
     state["baseline_done"] = True
     save_state(state)
