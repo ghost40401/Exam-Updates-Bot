@@ -1,86 +1,161 @@
 import requests
-from bs4 import BeautifulSoup
 import json
 import os
-from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 from datetime import datetime
+from PyPDF2 import PdfReader
+from io import BytesIO
 
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-if not DISCORD_WEBHOOK:
-    raise RuntimeError("DISCORD_WEBHOOK not set")
+WEBHOOK_URL = os.environ["DISCORD_WEBHOOK"]
+STATE_FILE = "posted.json"
+BASELINE_DATE = datetime(2026, 1, 1)
 
-DATA_FILE = "posted.json"
-
-SITES = {
-    "JEE Main": "https://jeemain.nta.nic.in/Downloads/",
-    "NEET": "https://neet.nta.nic.in/Downloads/",
-    "ICAI BOS": "https://www.icai.org/category/bos-important-announcements/",
-    "ICAI Foundation": "https://www.icai.org/category/foundation-course/",
-    "ICAI Intermediate": "https://www.icai.org/category/intermediate-course/",
-    "ICAI Final": "https://www.icai.org/category/final-course/"
+SOURCES = {
+    "ICAI Important": {
+        "url": "https://www.icai.org/post.html?post_id=important-announcement",
+        "org": "ICAI",
+        "exam": "IMPORTANT"
+    },
+    "ICAI Final": {
+        "url": "https://www.icai.org/post.html?post_id=final-course",
+        "org": "ICAI",
+        "exam": "CA FINAL"
+    },
+    "ICAI Intermediate": {
+        "url": "https://www.icai.org/post.html?post_id=intermediate-course",
+        "org": "ICAI",
+        "exam": "CA INTERMEDIATE"
+    },
+    "ICAI Foundation": {
+        "url": "https://www.icai.org/post.html?post_id=foundation-course",
+        "org": "ICAI",
+        "exam": "CA FOUNDATION"
+    }
 }
 
-try:
-    with open(DATA_FILE, "r") as f:
-        posted = json.load(f)
-except:
-    posted = {}
+EXAM_EMOJI = {
+    "CA FOUNDATION": "📘",
+    "CA INTERMEDIATE": "📗",
+    "CA FINAL": "📕",
+    "IMPORTANT": "🚨"
+}
 
-def send(title, url, source, date=None):
-    desc = f"Source: {source}"
-    if date:
-        desc += f"\nPublished: {date}"
+ORG_EMOJI = {
+    "ICAI": "🏛",
+    "NTA": "🧪"
+}
 
-    payload = {
-        "embeds": [{
-            "title": title,
-            "url": url,
-            "description": desc,
-            "color": 5793266
-        }]
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def fetch_pdfs(source):
+    r = requests.get(source)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    pdfs = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if href.lower().endswith(".pdf"):
+            if href.startswith("/"):
+                href = "https://www.icai.org" + href
+            pdfs.append((href, a.get_text(strip=True)))
+
+    return pdfs
+
+
+def get_pdf_date(url):
+    try:
+        head = requests.head(url, timeout=10)
+        lm = head.headers.get("Last-Modified")
+        if lm:
+            return datetime.strptime(lm, "%a, %d %b %Y %H:%M:%S %Z")
+    except:
+        pass
+    return None
+
+
+def get_pdf_title(url, anchor_text):
+    try:
+        r = requests.get(url, timeout=15)
+        reader = PdfReader(BytesIO(r.content))
+        meta = reader.metadata
+        if meta and meta.title and len(meta.title.strip()) > 5:
+            return meta.title.strip()
+    except:
+        pass
+
+    if anchor_text and len(anchor_text) > 8:
+        return anchor_text
+
+    return os.path.basename(url).replace(".pdf", "")
+
+
+def build_embed(org, exam, title, url, date):
+    if exam == "IMPORTANT":
+        description = f"{ORG_EMOJI[org]} **ICAI posted a new important announcement!** {EXAM_EMOJI['IMPORTANT']}"
+    else:
+        description = (
+            f"{ORG_EMOJI[org]} **{org} posted a circular for "
+            f"{EXAM_EMOJI[exam]} {exam}!**"
+        )
+
+    embed = {
+        "title": title,
+        "url": url,
+        "description": description,
+        "color": 0x5865F2,
+        "footer": {"text": f"Source: {org}"},
     }
 
-    print(f"[POST] {title}")
-    requests.post(DISCORD_WEBHOOK, json=payload)
+    if date:
+        embed["timestamp"] = date.isoformat()
 
-def clean_title(url):
-    name = url.split("/")[-1]
-    return name.replace("_", " ").replace(".pdf", "").strip()
+    return embed
 
-for name, page in SITES.items():
-    print(f"[SCAN] {name}")
-    try:
-        r = requests.get(page, timeout=20)
-        soup = BeautifulSoup(r.text, "html.parser")
-    except Exception as e:
-        print(f"[ERROR] {name}: {e}")
-        continue
 
-    pdfs = set()
+def send(embed):
+    requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
-    for a in soup.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
-        pdfs.add(urljoin(page, a["href"]))
 
-    print(f"[FOUND] {len(pdfs)} PDFs")
+def main():
+    posted = load_state()
 
-    for pdf in pdfs:
-        if pdf in posted.get(name, []):
-            continue
+    for name, data in SOURCES.items():
+        posted.setdefault(name, [])
+        pdfs = fetch_pdfs(data["url"])
 
-        title = clean_title(pdf)
+        dated = []
+        for url, anchor in pdfs:
+            date = get_pdf_date(url)
+            dated.append((url, anchor, date))
 
-        try:
-            head = requests.head(pdf, timeout=10)
-            date = head.headers.get("Last-Modified")
-            if date:
-                date = datetime.strptime(date, "%a, %d %b %Y %H:%M:%S %Z").strftime("%d-%m-%Y")
-        except:
-            date = None
+        dated.sort(key=lambda x: x[2] or datetime.min)
 
-        send(title, pdf, name, date)
-        posted.setdefault(name, []).append(pdf)
+        for url, anchor, date in dated:
+            if url in posted[name]:
+                continue
 
-with open(DATA_FILE, "w") as f:
-    json.dump(posted, f, indent=2)
+            if date and date < BASELINE_DATE:
+                posted[name].append(url)
+                continue
 
-print("[DONE]")
+            title = get_pdf_title(url, anchor)
+            embed = build_embed(data["org"], data["exam"], title, url, date)
+            send(embed)
+            posted[name].append(url)
+
+    save_state(posted)
+
+
+if __name__ == "__main__":
+    main()
