@@ -54,16 +54,34 @@ for name, base_url in sites.items():
     if "nta.nic.in" in base_url:
         for a in soup.select("a[href]"):
             text = a.text.strip()
+            href = urljoin(base_url, a['href'])
             if text and ("Notification" in text or "Circular" in text or "Update" in text):
-                full_url = urljoin(base_url, a['href'])
-                links.append((text, full_url))
+                # check if link ends with PDF
+                if href.lower().endswith(".pdf"):
+                    links.append((text + " (PDF)", href))
+                else:
+                    links.append((text, href))
 
     # ICAI parsing
     else:
         for post in soup.select("h3.entry-title a"):
             title = post.text.strip()
             href = urljoin(base_url, post['href'])
-            links.append((title, href))
+
+            # Check if post contains PDF
+            try:
+                post_res = requests.get(href, timeout=10)
+                post_soup = BeautifulSoup(post_res.text, "html.parser")
+                pdf_link = None
+                for a in post_soup.select("a[href$='.pdf']"):
+                    pdf_link = urljoin(href, a['href'])
+                    break  # take first PDF
+                if pdf_link:
+                    links.append((title + " (PDF)", pdf_link))
+                else:
+                    links.append((title, href))
+            except:
+                links.append((title, href))
 
     # Post new links
     for title, link in links:
