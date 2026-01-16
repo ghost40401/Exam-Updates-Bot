@@ -2,9 +2,13 @@ import requests
 from bs4 import BeautifulSoup
 import json
 from urllib.parse import urljoin
+import os
 
 # ===== CONFIG =====
-DISCORD_WEBHOOK = "YOUR_DISCORD_WEBHOOK_URL"  # replace with your webhook
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")  # Read from GitHub Secrets
+if not DISCORD_WEBHOOK:
+    raise ValueError("DISCORD_WEBHOOK environment variable not set!")
+
 DATA_FILE = "posted.json"
 
 # Websites to track
@@ -56,7 +60,6 @@ for name, base_url in sites.items():
             text = a.text.strip()
             href = urljoin(base_url, a['href'])
             if text and ("Notification" in text or "Circular" in text or "Update" in text):
-                # check if link ends with PDF
                 if href.lower().endswith(".pdf"):
                     links.append((text + " (PDF)", href))
                 else:
