@@ -144,16 +144,14 @@ def main():
         pdfs.sort(key=lambda x: x[2] or datetime.min)
 
         for url, title, date in pdfs:
-            is_jan_2026 = (
-                date
-                and date.year == BASELINE_YEAR
-                and date.month == BASELINE_MONTH
-            )
+            BASELINE_LIMIT = 5  # per source
 
-            if not state["baseline_done"]:
-                if not is_jan_2026:
-                    state["posted"][name].append(url)
-                    continue
+if not state["baseline_done"]:
+    baseline_batch = pdfs[-BASELINE_LIMIT:]
+    if (url, title, date) not in baseline_batch:
+        state["posted"][name].append(url)
+        continue
+
             else:
                 if url in state["posted"][name]:
                     continue
