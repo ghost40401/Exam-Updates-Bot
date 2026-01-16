@@ -143,21 +143,21 @@ def main():
         pdfs = fetch_pdfs(src)
         pdfs.sort(key=lambda x: x[2] or datetime.min)
 
-        for url, title, date in pdfs:
-            BASELINE_LIMIT = 5  # per source
+       BASELINE_LIMIT = 5  # per source
+baseline_batch = pdfs[-BASELINE_LIMIT:]
 
-if not state["baseline_done"]:
-    baseline_batch = pdfs[-BASELINE_LIMIT:]
-    if (url, title, date) not in baseline_batch:
-        state["posted"][name].append(url)
-        continue
-
-            else:
-                if url in state["posted"][name]:
-                    continue
-
-            send_embed(src, title, url, date)
+for url, title, date in pdfs:
+    if not state["baseline_done"]:
+        if (url, title, date) not in baseline_batch:
             state["posted"][name].append(url)
+            continue
+    else:
+        if url in state["posted"][name]:
+            continue
+
+    send_embed(src, title, url, date)
+    state["posted"][name].append(url)
+
 
     state["baseline_done"] = True
     save_state(state)
