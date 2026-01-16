@@ -7,7 +7,8 @@ from datetime import datetime
 WEBHOOK = os.environ["DISCORD_WEBHOOK"]
 STATE_FILE = "posted.json"
 
-BASELINE_MONTH = (2026, 1)
+BASELINE_YEAR = 2026
+BASELINE_MONTH = 1
 
 SOURCES = {
     "ICAI Important": {
@@ -41,10 +42,20 @@ EMOJI = {
 
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
-            return json.load(f)
-    return {"posted": {}, "baseline_done": False}
+    if not os.path.exists(STATE_FILE):
+        return {"posted": {}, "baseline_done": False}
+
+    with open(STATE_FILE) as f:
+        data = json.load(f)
+
+    # backward compatibility
+    if "posted" not in data:
+        return {
+            "posted": data,
+            "baseline_done": False
+        }
+
+    return data
 
 
 def save_state(state):
@@ -56,41 +67,46 @@ def fetch_posts(url):
     soup = BeautifulSoup(requests.get(url, timeout=20).text, "html.parser")
     posts = []
 
-    for post in soup.select("article"):
-        link = post.select_one("a[href$='.pdf']")
-        if not link:
+    for article in soup.select("article"):
+        pdf = article.select_one("a[href$='.pdf']")
+        if not pdf:
             continue
 
-        title = link.get_text(strip=True)
-        href = link["href"]
-        if href.startswith("/"):
-            href = "https://www.icai.org" + href
+        title = pdf.get_text(strip=True)
+        link = pdf["href"]
+        if link.startswith("/"):
+            link = "https://www.icai.org" + link
 
-        date_tag = post.select_one("time")
         date = None
+        date_tag = article.select_one("time")
         if date_tag:
-            date = datetime.strptime(date_tag.text.strip(), "%d %b %Y")
+            try:
+                date = datetime.strptime(date_tag.text.strip(), "%d %b %Y")
+            except:
+                pass
 
-        posts.append((href, title, date))
+        posts.append((link, title, date))
 
     return posts
 
 
-def send(org, exam, title, url, date):
+def send_embed(org, exam, title, url, date):
     if exam == "IMPORTANT":
-        desc = f"🚨 **ICAI posted a new important announcement!**"
+        desc = "🚨 **ICAI posted a new important announcement!**"
     else:
-        desc = f"🏛 **ICAI posted a circular for {exam}!** {EMOJI[exam]}"
+        desc = f"🏛 **{org} posted a circular for {exam}!** {EMOJI[exam]}"
 
     embed = {
         "title": title,
         "url": url,
         "description": desc,
-        "color": 0x5865F2
+        "color": 5793266
     }
 
     if date:
-        embed["footer"] = {"text": f"Published: {date.strftime('%d-%m-%Y')}"}
+        embed["footer"] = {
+            "text": f"Published: {date.strftime('%d-%m-%Y')}"
+        }
 
     requests.post(WEBHOOK, json={"embeds": [embed]})
 
@@ -105,7 +121,11 @@ def main():
         posts.sort(key=lambda x: x[2] or datetime.min)
 
         for url, title, date in posts:
-            is_jan_2026 = date and (date.year, date.month) == BASELINE_MONTH
+            is_jan_2026 = (
+                date
+                and date.year == BASELINE_YEAR
+                and date.month == BASELINE_MONTH
+            )
 
             if not state["baseline_done"]:
                 if not is_jan_2026:
@@ -115,7 +135,7 @@ def main():
                 if url in state["posted"][key]:
                     continue
 
-            send(cfg["org"], cfg["exam"], title, url, date)
+            send_embed(cfg["org"], cfg["exam"], title, url, date)
             state["posted"][key].append(url)
 
     state["baseline_done"] = True
