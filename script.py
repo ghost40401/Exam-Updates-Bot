@@ -50,6 +50,12 @@ SOURCES = {
         "org": "ICAI",
         "exam": "CA FINAL",
         "emoji": "📕"
+    },
+    "ICAI Main Announcements": {
+    "url": "https://www.icai.org/category/announcements/",
+    "org": "ICAI",
+    "exam": "ANNOUNCEMENT",
+    "emoji": "📢"
     }
 }
 
@@ -112,7 +118,9 @@ def fetch_pdfs(source):
 
 def send_embed(src, title, url, date):
     if src["exam"] == "IMPORTANT":
-        desc = f"{src['emoji']} **ICAI posted a new important announcement!**"
+        desc = "🚨 **ICAI posted a new important announcement!**"
+    elif src["exam"] == "ANNOUNCEMENT":
+        desc = "📢 **ICAI posted a new announcement!**"
     else:
         desc = (
             f"{src['emoji']} **{src['org']} posted a circular for "
