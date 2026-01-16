@@ -3,8 +3,6 @@ import json
 import os
 from bs4 import BeautifulSoup
 from datetime import datetime
-from PyPDF2 import PdfReader
-from io import BytesIO
 
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK"]
 STATE_FILE = "posted.json"
@@ -58,25 +56,26 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def fetch_pdfs(source):
-    r = requests.get(source)
+def fetch_pdfs(url):
+    r = requests.get(url, timeout=20)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    pdfs = []
+    results = []
     for a in soup.find_all("a", href=True):
         href = a["href"]
         if href.lower().endswith(".pdf"):
             if href.startswith("/"):
                 href = "https://www.icai.org" + href
-            pdfs.append((href, a.get_text(strip=True)))
+            text = a.get_text(strip=True)
+            results.append((href, text))
 
-    return pdfs
+    return results
 
 
 def get_pdf_date(url):
     try:
-        head = requests.head(url, timeout=10)
-        lm = head.headers.get("Last-Modified")
+        r = requests.head(url, timeout=10)
+        lm = r.headers.get("Last-Modified")
         if lm:
             return datetime.strptime(lm, "%a, %d %b %Y %H:%M:%S %Z")
     except:
@@ -84,37 +83,26 @@ def get_pdf_date(url):
     return None
 
 
-def get_pdf_title(url, anchor_text):
-    try:
-        r = requests.get(url, timeout=15)
-        reader = PdfReader(BytesIO(r.content))
-        meta = reader.metadata
-        if meta and meta.title and len(meta.title.strip()) > 5:
-            return meta.title.strip()
-    except:
-        pass
+def clean_title(anchor, url):
+    if anchor and len(anchor) > 10:
+        return anchor
 
-    if anchor_text and len(anchor_text) > 8:
-        return anchor_text
-
-    return os.path.basename(url).replace(".pdf", "")
+    name = os.path.basename(url).replace(".pdf", "")
+    return name.replace("_", " ").upper()
 
 
 def build_embed(org, exam, title, url, date):
     if exam == "IMPORTANT":
-        description = f"{ORG_EMOJI[org]} **ICAI posted a new important announcement!** {EXAM_EMOJI['IMPORTANT']}"
+        desc = f"{ORG_EMOJI[org]} **ICAI posted a new important announcement!** {EXAM_EMOJI['IMPORTANT']}"
     else:
-        description = (
-            f"{ORG_EMOJI[org]} **{org} posted a circular for "
-            f"{EXAM_EMOJI[exam]} {exam}!**"
-        )
+        desc = f"{ORG_EMOJI[org]} **{org} posted a circular for {EXAM_EMOJI[exam]} {exam}!**"
 
     embed = {
         "title": title,
         "url": url,
-        "description": description,
+        "description": desc,
         "color": 0x5865F2,
-        "footer": {"text": f"Source: {org}"},
+        "footer": {"text": f"Source: {org}"}
     }
 
     if date:
@@ -130,29 +118,30 @@ def send(embed):
 def main():
     posted = load_state()
 
-    for name, data in SOURCES.items():
-        posted.setdefault(name, [])
-        pdfs = fetch_pdfs(data["url"])
+    for key, cfg in SOURCES.items():
+        posted.setdefault(key, [])
 
-        dated = []
+        pdfs = fetch_pdfs(cfg["url"])
+        items = []
+
         for url, anchor in pdfs:
             date = get_pdf_date(url)
-            dated.append((url, anchor, date))
+            items.append((url, anchor, date))
 
-        dated.sort(key=lambda x: x[2] or datetime.min)
+        items.sort(key=lambda x: x[2] or datetime.min)
 
-        for url, anchor, date in dated:
-            if url in posted[name]:
+        for url, anchor, date in items:
+            if url in posted[key]:
                 continue
 
             if date and date < BASELINE_DATE:
-                posted[name].append(url)
+                posted[key].append(url)
                 continue
 
-            title = get_pdf_title(url, anchor)
-            embed = build_embed(data["org"], data["exam"], title, url, date)
+            title = clean_title(anchor, url)
+            embed = build_embed(cfg["org"], cfg["exam"], title, url, date)
             send(embed)
-            posted[name].append(url)
+            posted[key].append(url)
 
     save_state(posted)
 
