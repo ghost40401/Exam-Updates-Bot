@@ -16,6 +16,12 @@ jobs:
           python-version: 3.11
       - name: Install dependencies
         run: pip install requests beautifulsoup4
+      - name: Cache posted.json
+        uses: actions/cache@v3
+        with:
+          path: posted.json
+          key: posted-json
+
       - name: Run script
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
