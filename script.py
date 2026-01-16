@@ -41,12 +41,15 @@ def send_discord(title, url, source, pub_date=None):
             "color": 3447003
         }]
     }
+    print(f"[DEBUG] Sending to Discord: {title} -> {url}")  # debug print
     response = requests.post(DISCORD_WEBHOOK, json=embed)
     if response.status_code != 204:
         print(f"Failed to send {title} - {response.status_code}")
 
 # Scrape each site
 for name, base_url in sites.items():
+    print(f"[DEBUG] Checking site: {name} -> {base_url}")  # debug print
+
     try:
         res = requests.get(base_url, timeout=15)
         res.raise_for_status()
@@ -101,8 +104,13 @@ for name, base_url in sites.items():
                     links.append((title + " (PDF)", pdf_link, pub_date))
                 else:
                     links.append((title, href, pub_date))
-            except:
+            except Exception as e:
+                print(f"[DEBUG] Error fetching post {href}: {e}")
                 links.append((title, href, pub_date))
+
+    print(f"[DEBUG] Found {len(links)} links on {name}")  # debug print
+    for t, l, d in links:
+        print(f"[DEBUG] Link: {t} -> {l} | Date: {d}")  # debug print
 
     # Post new links
     for title, link, pub_date in links:
@@ -113,3 +121,4 @@ for name, base_url in sites.items():
 # Save updated posted links
 with open(DATA_FILE, "w") as f:
     json.dump(posted, f, indent=2)
+print("[DEBUG] Script finished")  # debug print
