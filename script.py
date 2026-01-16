@@ -3,15 +3,15 @@ from bs4 import BeautifulSoup
 import json
 from urllib.parse import urljoin
 import os
+from datetime import datetime
 
 # ===== CONFIG =====
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")  # Read from GitHub Secrets
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 if not DISCORD_WEBHOOK:
     raise ValueError("DISCORD_WEBHOOK environment variable not set!")
 
 DATA_FILE = "posted.json"
 
-# Websites to track
 sites = {
     "JEE Main": "https://jeemain.nta.nic.in/",
     "NEET": "https://neet.nta.nic.in/",
@@ -29,12 +29,15 @@ except FileNotFoundError:
     posted = {}
 
 # Send Discord embed
-def send_discord(title, url, source):
+def send_discord(title, url, source, pub_date=None):
+    description = f"Source: {source}"
+    if pub_date:
+        description += f"\nPublished: {pub_date}"
     embed = {
         "embeds": [{
             "title": title,
             "url": url,
-            "description": f"Source: {source}",
+            "description": description,
             "color": 3447003
         }]
     }
@@ -54,42 +57,57 @@ for name, base_url in sites.items():
 
     links = []
 
-    # NTA (JEE/NEET) parsing
+    # NTA (JEE/NEET)
     if "nta.nic.in" in base_url:
         for a in soup.select("a[href]"):
             text = a.text.strip()
             href = urljoin(base_url, a['href'])
             if text and ("Notification" in text or "Circular" in text or "Update" in text):
+                # Try to get date from nearby text
+                pub_date = None
+                parent_text = a.find_parent().text
+                if parent_text:
+                    for part in parent_text.split():
+                        try:
+                            dt = datetime.strptime(part, "%d-%m-%Y")
+                            pub_date = dt.strftime("%d-%m-%Y")
+                            break
+                        except:
+                            continue
                 if href.lower().endswith(".pdf"):
-                    links.append((text + " (PDF)", href))
+                    links.append((text + " (PDF)", href, pub_date))
                 else:
-                    links.append((text, href))
+                    links.append((text, href, pub_date))
 
-    # ICAI parsing
+    # ICAI
     else:
         for post in soup.select("h3.entry-title a"):
             title = post.text.strip()
             href = urljoin(base_url, post['href'])
-
-            # Check if post contains PDF
+            pub_date = None
             try:
                 post_res = requests.get(href, timeout=10)
                 post_soup = BeautifulSoup(post_res.text, "html.parser")
+                # Extract date from ICAI post meta
+                date_tag = post_soup.select_one("time.entry-date")
+                if date_tag:
+                    pub_date = date_tag.text.strip()
+                # Check PDF in post
                 pdf_link = None
                 for a in post_soup.select("a[href$='.pdf']"):
                     pdf_link = urljoin(href, a['href'])
-                    break  # take first PDF
+                    break
                 if pdf_link:
-                    links.append((title + " (PDF)", pdf_link))
+                    links.append((title + " (PDF)", pdf_link, pub_date))
                 else:
-                    links.append((title, href))
+                    links.append((title, href, pub_date))
             except:
-                links.append((title, href))
+                links.append((title, href, pub_date))
 
     # Post new links
-    for title, link in links:
+    for title, link, pub_date in links:
         if link not in posted.get(name, []):
-            send_discord(title, link, name)
+            send_discord(title, link, name, pub_date)
             posted.setdefault(name, []).append(link)
 
 # Save updated posted links
