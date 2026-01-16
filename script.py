@@ -4,51 +4,47 @@ import os
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-WEBHOOK_URL = os.environ["DISCORD_WEBHOOK"]
+WEBHOOK = os.environ["DISCORD_WEBHOOK"]
 STATE_FILE = "posted.json"
-BASELINE_DATE = datetime(2026, 1, 1)
+
+BASELINE_MONTH = (2026, 1)
 
 SOURCES = {
     "ICAI Important": {
-        "url": "https://www.icai.org/post.html?post_id=important-announcement",
+        "url": "https://www.icai.org/category/bos-important-announcements",
         "org": "ICAI",
         "exam": "IMPORTANT"
     },
-    "ICAI Final": {
-        "url": "https://www.icai.org/post.html?post_id=final-course",
+    "ICAI Foundation": {
+        "url": "https://www.icai.org/category/foundation-course",
         "org": "ICAI",
-        "exam": "CA FINAL"
+        "exam": "CA FOUNDATION"
     },
     "ICAI Intermediate": {
-        "url": "https://www.icai.org/post.html?post_id=intermediate-course",
+        "url": "https://www.icai.org/category/intermediate-course",
         "org": "ICAI",
         "exam": "CA INTERMEDIATE"
     },
-    "ICAI Foundation": {
-        "url": "https://www.icai.org/post.html?post_id=foundation-course",
+    "ICAI Final": {
+        "url": "https://www.icai.org/category/final-course",
         "org": "ICAI",
-        "exam": "CA FOUNDATION"
+        "exam": "CA FINAL"
     }
 }
 
-EXAM_EMOJI = {
+EMOJI = {
+    "IMPORTANT": "🚨",
     "CA FOUNDATION": "📘",
     "CA INTERMEDIATE": "📗",
-    "CA FINAL": "📕",
-    "IMPORTANT": "🚨"
-}
-
-ORG_EMOJI = {
-    "ICAI": "🏛",
-    "NTA": "🧪"
+    "CA FINAL": "📕"
 }
 
 
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
+        with open(STATE_FILE) as f:
             return json.load(f)
-    return {}
+    return {"posted": {}, "baseline_done": False}
 
 
 def save_state(state):
@@ -56,94 +52,74 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def fetch_pdfs(url):
-    r = requests.get(url, timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
+def fetch_posts(url):
+    soup = BeautifulSoup(requests.get(url, timeout=20).text, "html.parser")
+    posts = []
 
-    results = []
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if href.lower().endswith(".pdf"):
-            if href.startswith("/"):
-                href = "https://www.icai.org" + href
-            text = a.get_text(strip=True)
-            results.append((href, text))
+    for post in soup.select("article"):
+        link = post.select_one("a[href$='.pdf']")
+        if not link:
+            continue
 
-    return results
+        title = link.get_text(strip=True)
+        href = link["href"]
+        if href.startswith("/"):
+            href = "https://www.icai.org" + href
 
+        date_tag = post.select_one("time")
+        date = None
+        if date_tag:
+            date = datetime.strptime(date_tag.text.strip(), "%d %b %Y")
 
-def get_pdf_date(url):
-    try:
-        r = requests.head(url, timeout=10)
-        lm = r.headers.get("Last-Modified")
-        if lm:
-            return datetime.strptime(lm, "%a, %d %b %Y %H:%M:%S %Z")
-    except:
-        pass
-    return None
+        posts.append((href, title, date))
+
+    return posts
 
 
-def clean_title(anchor, url):
-    if anchor and len(anchor) > 10:
-        return anchor
-
-    name = os.path.basename(url).replace(".pdf", "")
-    return name.replace("_", " ").upper()
-
-
-def build_embed(org, exam, title, url, date):
+def send(org, exam, title, url, date):
     if exam == "IMPORTANT":
-        desc = f"{ORG_EMOJI[org]} **ICAI posted a new important announcement!** {EXAM_EMOJI['IMPORTANT']}"
+        desc = f"🚨 **ICAI posted a new important announcement!**"
     else:
-        desc = f"{ORG_EMOJI[org]} **{org} posted a circular for {EXAM_EMOJI[exam]} {exam}!**"
+        desc = f"🏛 **ICAI posted a circular for {exam}!** {EMOJI[exam]}"
 
     embed = {
         "title": title,
         "url": url,
         "description": desc,
-        "color": 0x5865F2,
-        "footer": {"text": f"Source: {org}"}
+        "color": 0x5865F2
     }
 
     if date:
-        embed["timestamp"] = date.isoformat()
+        embed["footer"] = {"text": f"Published: {date.strftime('%d-%m-%Y')}"}
 
-    return embed
-
-
-def send(embed):
-    requests.post(WEBHOOK_URL, json={"embeds": [embed]})
+    requests.post(WEBHOOK, json={"embeds": [embed]})
 
 
 def main():
-    posted = load_state()
+    state = load_state()
 
     for key, cfg in SOURCES.items():
-        posted.setdefault(key, [])
+        state["posted"].setdefault(key, [])
 
-        pdfs = fetch_pdfs(cfg["url"])
-        items = []
+        posts = fetch_posts(cfg["url"])
+        posts.sort(key=lambda x: x[2] or datetime.min)
 
-        for url, anchor in pdfs:
-            date = get_pdf_date(url)
-            items.append((url, anchor, date))
+        for url, title, date in posts:
+            is_jan_2026 = date and (date.year, date.month) == BASELINE_MONTH
 
-        items.sort(key=lambda x: x[2] or datetime.min)
+            if not state["baseline_done"]:
+                if not is_jan_2026:
+                    state["posted"][key].append(url)
+                    continue
+            else:
+                if url in state["posted"][key]:
+                    continue
 
-        for url, anchor, date in items:
-            if url in posted[key]:
-                continue
+            send(cfg["org"], cfg["exam"], title, url, date)
+            state["posted"][key].append(url)
 
-            if date and date < BASELINE_DATE:
-                posted[key].append(url)
-                continue
-
-            title = clean_title(anchor, url)
-            embed = build_embed(cfg["org"], cfg["exam"], title, url, date)
-            send(embed)
-            posted[key].append(url)
-
-    save_state(posted)
+    state["baseline_done"] = True
+    save_state(state)
 
 
 if __name__ == "__main__":
