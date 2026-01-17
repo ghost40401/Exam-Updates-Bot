@@ -211,9 +211,10 @@ def main():
 
     # 2️⃣ Apply baseline rule
     BASELINE_START = datetime(2025, 10, 1)
-    if date:
-        if date < BASELINE:
-            continue
+    if date and date < BASELINE:
+        skip = True
+    else:
+        skip = False
 
     BASELINE_PDFS = []
     for url, title, date, src in ALL_PDFS:
