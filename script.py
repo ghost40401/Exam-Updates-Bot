@@ -142,9 +142,6 @@ def fetch_pdfs(src):
                 found = True
                 pdf_url = urljoin(url, a["href"])
                 title = a.get_text(" ", strip=True) or clean_title_from_url(pdf_url)
-if date:
-    if date < BASELINE:
-        continue
                 text = a.parent.get_text(" ", strip=True)
                 date = extract_date_from_text(text)
 
