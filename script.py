@@ -178,29 +178,27 @@ def main():
     state = load_state()
     
     for name, src in SOURCES.items():
-    state["posted"].setdefault(name, [])
+        state["posted"].setdefault(name, [])
+        pdfs = fetch_pdfs(src)
+        # sort by date (old → new)
+        pdfs.sort(key=lambda x: x[2] or datetime.min)
 
-    pdfs = fetch_pdfs(src)
-
-    # sort by date (old → new)
-    pdfs.sort(key=lambda x: x[2] or datetime.min)
-
-    for url, title, date in pdfs:
-        if url in state["posted"][name]:
-            continue
-
-        # baseline run → only January 2026 PDFs
-        if not state["baseline_done"].get(name, False):
-            if not date:
-                continue
-            if date.year != BASELINE_YEAR or date.month != BASELINE_MONTH:
+        for url, title, date in pdfs:
+            if url in state["posted"][name]:
                 continue
 
-        send_embed(src, title, url, date)
-        state["posted"][name].append(url)
+            # baseline run → only January 2026 PDFs
+            if not state["baseline_done"].get(name, False):
+                if not date:
+                    continue
+                if date.year != BASELINE_YEAR or date.month != BASELINE_MONTH:
+                    continue
+    
+            send_embed(src, title, url, date)
+            state["posted"][name].append(url)
 
-    # mark baseline done per source
-    state["baseline_done"][name] = True
+        # mark baseline done per source
+        state["baseline_done"][name] = True
 
     save_state(state)
 
