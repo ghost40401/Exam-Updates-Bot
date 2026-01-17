@@ -11,12 +11,6 @@ if not DISCORD_WEBHOOK:
 
 STATE_FILE = "posted.json"
 
-BASELINE_START = datetime(2025, 10, 1)
-
-if date:
-    if date < BASELINE:
-        continue
-
 SOURCES = {
     "JEE Main": {
         "url": "https://jeemain.nta.nic.in/Downloads/",
@@ -146,7 +140,9 @@ def fetch_pdfs(src):
                 found = True
                 pdf_url = urljoin(url, a["href"])
                 title = a.get_text(" ", strip=True) or clean_title_from_url(pdf_url)
-
+if date:
+    if date < BASELINE:
+        continue
                 text = a.parent.get_text(" ", strip=True)
                 date = extract_date_from_text(text)
 
@@ -216,6 +212,9 @@ def main():
 
     # 2️⃣ Apply baseline rule
     BASELINE_START = datetime(2025, 10, 1)
+    if date:
+        if date < BASELINE:
+            continue
 
     BASELINE_PDFS = []
     for url, title, date, src in ALL_PDFS:
