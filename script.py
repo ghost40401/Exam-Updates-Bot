@@ -90,8 +90,45 @@ def clean_title_from_url(url):
 
 def fetch_pdfs(src):
     all_pdfs = []
-    page = 1
 
+    # ---------- NTA: JEE / NEET ----------
+    if src["org"] == "NTA":
+        r = requests.get(src["url"], timeout=20)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        sections = []
+
+        # JEE Public Notices
+        sections.append(
+            soup.select_one("div#1648447930282-deb48cc0-95ec")
+        )
+
+        # NEET Public Notices
+        sections.append(
+            soup.select_one("div#1648449005032-46466f25-2ebe")
+        )
+
+        # Information dropdown content
+        info_menu = soup.select_one("li#menu-item-6563")
+        if info_menu:
+            sections.append(info_menu)
+
+        for section in sections:
+            if not section:
+                continue
+
+            for a in section.select("a[href$='.pdf']"):
+                pdf_url = urljoin(src["url"], a["href"])
+                title = a.get_text(strip=True)
+                if not title:
+                    title = clean_title_from_url(pdf_url)
+
+                all_pdfs.append((pdf_url, title, None))
+
+        return list(dict.fromkeys(all_pdfs))  # de-dup, preserve order
+
+    # ---------- ICAI (paginated) ----------
+    page = 1
     while True:
         url = src["url"]
         if page > 1:
@@ -102,19 +139,17 @@ def fetch_pdfs(src):
             break
 
         soup = BeautifulSoup(r.text, "html.parser")
-        found_any = False
+        container = soup.select_one("div.container.mx-3")
+        if not container:
+            break
 
-        for a in soup.select(
-            "a[href$='.pdf'], "
-            "a[href*='/wp-content/uploads/'], "
-            "a[href*='PublicNotice'], "
-            "a[href*='public-notice']"
-        ):
+        found = False
 
-            found_any = True
+        for a in container.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
+            found = True
             pdf_url = urljoin(url, a["href"])
             title = a.get_text(strip=True)
-            if not title or len(title) < 6:
+            if not title:
                 title = clean_title_from_url(pdf_url)
 
             date = None
@@ -130,12 +165,12 @@ def fetch_pdfs(src):
 
             all_pdfs.append((pdf_url, title, date))
 
-        if not found_any:
+        if not found:
             break
 
         page += 1
 
-    # de-duplicate while preserving order
+    # de-duplicate
     seen = set()
     unique = []
     for item in all_pdfs:
