@@ -9,10 +9,8 @@ from playwright.sync_api import sync_playwright
 # --- CONFIGURATION ---
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 STATE_FILE = "posted.json"
-# Baseline: 01 October 2025 [cite: 5]
 BASELINE_START = datetime(2025, 10, 1)
 
-# Source Definitions 
 SOURCES = [
     {
         "name": "JEE Main",
@@ -21,9 +19,9 @@ SOURCES = [
         "exam": "JEE MAIN",
         "emoji": "🧪",
         "type": "NTA",
-        # Specific DIV ID for Public Notices 
-        "selector": "div#1648447930282-deb48cc0-95ec",
-        "menu_id": "li#menu-item-6563"
+        # FIX 1: Use attribute selector for IDs starting with numbers
+        "selector": "div[id='1648447930282-deb48cc0-95ec']",
+        "menu_id": "li[id='menu-item-6563']"
     },
     {
         "name": "NEET",
@@ -32,15 +30,15 @@ SOURCES = [
         "exam": "NEET",
         "emoji": "🩺",
         "type": "NTA",
-        # Specific DIV ID for Public Notices 
-        "selector": "div#1648449005032-46466f25-2ebe",
-        "menu_id": "li#menu-item-6563"
+        # FIX 1: Use attribute selector for IDs starting with numbers
+        "selector": "div[id='1648449005032-46466f25-2ebe']",
+        "menu_id": "li[id='menu-item-6563']"
     },
     {
         "name": "ICAI BOS",
         "url": "https://www.icai.org/category/bos-important-announcements/",
         "org": "ICAI",
-        "exam": "IMPORTANT", # Trigger for specific msg [cite: 8]
+        "exam": "IMPORTANT",
         "emoji": "🚨",
         "type": "ICAI"
     },
@@ -48,7 +46,7 @@ SOURCES = [
         "name": "ICAI Foundation",
         "url": "https://www.icai.org/category/foundation-course/",
         "org": "ICAI",
-        "exam": "CA FOUNDATION", # Trigger for specific msg [cite: 10]
+        "exam": "CA FOUNDATION",
         "emoji": "📘",
         "type": "ICAI"
     },
@@ -56,7 +54,7 @@ SOURCES = [
         "name": "ICAI Intermediate",
         "url": "https://www.icai.org/category/intermediate-course/",
         "org": "ICAI",
-        "exam": "CA INTERMEDIATE", # Trigger for specific msg [cite: 10]
+        "exam": "CA INTERMEDIATE",
         "emoji": "📗",
         "type": "ICAI"
     },
@@ -64,7 +62,7 @@ SOURCES = [
         "name": "ICAI Final",
         "url": "https://www.icai.org/category/final-course/",
         "org": "ICAI",
-        "exam": "CA FINAL", # Trigger for specific msg [cite: 10]
+        "exam": "CA FINAL",
         "emoji": "📕",
         "type": "ICAI"
     },
@@ -72,19 +70,32 @@ SOURCES = [
         "name": "ICAI Main",
         "url": "https://www.icai.org/category/announcements/",
         "org": "ICAI",
-        "exam": "ANNOUNCEMENT", # Trigger for specific msg [cite: 9]
+        "exam": "ANNOUNCEMENT",
         "emoji": "📢",
         "type": "ICAI"
     }
 ]
 
 def load_state():
+    """Safely loads state, handling migration from old dict format to list."""
     if not os.path.exists(STATE_FILE):
         return []
     try:
         with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except:
+            data = json.load(f)
+            
+            # FIX 2: Handle legacy dictionary format
+            if isinstance(data, dict):
+                # Extract the old global list if it exists, or return empty
+                return data.get("posted", {}).get("_global", [])
+            
+            # If it's already a list (new format), return it
+            if isinstance(data, list):
+                return data
+                
+            return []
+    except Exception as e:
+        print(f"Warning: Could not load state file ({e}). Starting fresh.")
         return []
 
 def save_state(posted_urls):
@@ -92,10 +103,8 @@ def save_state(posted_urls):
         json.dump(posted_urls, f, indent=2)
 
 def extract_date(text):
-    """Attempts to parse a date from text string."""
     if not text:
         return None
-    # Patterns for dd-mm-yyyy, dd/mm/yyyy, dd Month yyyy
     patterns = [
         (r'\d{2}-\d{2}-\d{4}', "%d-%m-%Y"),
         (r'\d{2}/\d{2}/\d{4}', "%d/%m/%Y"),
@@ -111,8 +120,30 @@ def extract_date(text):
                 continue
     return None
 
+def process_link(link_element, source, candidates_list):
+    try:
+        url_suffix = link_element.get_attribute("href")
+        if not url_suffix:
+            return
+
+        text = link_element.inner_text().strip()
+        full_url = urljoin(source['url'], url_suffix)
+        
+        if "javascript" in full_url.lower() or not text:
+            return
+
+        date_obj = extract_date(text)
+        
+        candidates_list.append({
+            "url": full_url,
+            "title": text,
+            "date": date_obj,
+            "source": source
+        })
+    except:
+        pass
+
 def scrape_nta(page, source):
-    """Scrapes NTA sites: Public Notices AND Information Dropdown."""
     candidates = []
     print(f"[{source['name']}] Navigating...")
     
@@ -122,72 +153,39 @@ def scrape_nta(page, source):
         print(f"Error loading {source['name']}: {e}")
         return []
 
-    # --- PART 1: Public Notices (div container) ---
+    # --- PART 1: Public Notices ---
     try:
-        # Wait for the specific Public Notice container
         page.wait_for_selector(source['selector'], timeout=30000)
         container = page.locator(source['selector'])
         notice_links = container.locator("a").all()
-        
         for link in notice_links:
             process_link(link, source, candidates)
-            
     except Exception as e:
-        print(f"[{source['name']}] Public Notice section error: {e}")
+        print(f"[{source['name']}] Public Notice section skipped/error: {e}")
 
-    # --- PART 2: Information Dropdown (li menu) ---
+    # --- PART 2: Information Dropdown ---
     if source.get('menu_id'):
         try:
             menu_selector = source['menu_id']
+            # Wait for menu to be attached
+            page.wait_for_selector(menu_selector, state="attached", timeout=10000)
             menu_item = page.locator(menu_selector)
             
-            # Hover to ensure sub-menus are generated/visible in the DOM
             if menu_item.count() > 0:
-                menu_item.hover()
-                
-                # Extract all links inside the dropdown (including sub-items)
+                try:
+                    menu_item.hover(timeout=5000)
+                except:
+                    pass # Continue even if hover acts up (sometimes items exist without hover)
+
                 dropdown_links = menu_item.locator("a").all()
-                print(f"[{source['name']}] Found {len(dropdown_links)} links in Information menu.")
-                
                 for link in dropdown_links:
                     process_link(link, source, candidates)
-            else:
-                print(f"[{source['name']}] Menu selector {menu_selector} not found.")
-
         except Exception as e:
-            print(f"[{source['name']}] Menu scraping error: {e}")
+            print(f"[{source['name']}] Menu scraping skipped: {e}")
 
     return candidates
 
-def process_link(link_element, source, candidates_list):
-    """Helper to extract data from a link element and add to list."""
-    try:
-        url_suffix = link_element.get_attribute("href")
-        if not url_suffix:
-            return
-
-        text = link_element.inner_text().strip()
-        full_url = urljoin(source['url'], url_suffix)
-        
-        # Filter: Ignore javascript:void(0) or empty links
-        if "javascript" in full_url.lower() or not text:
-            return
-
-        # Attempt to get date from the link text
-        date_obj = extract_date(text)
-        
-        candidates_list.append({
-            "url": full_url,
-            "title": text,
-            "date": date_obj,
-            "source": source
-        })
-    except Exception as e:
-        # Silently fail for individual bad links
-        pass
-
 def scrape_icai(page, source):
-    """Scrapes ICAI announcements list."""
     candidates = []
     print(f"[{source['name']}] Navigating...")
     try:
@@ -196,30 +194,14 @@ def scrape_icai(page, source):
     except:
         return []
 
-    # Get all announcement links in the container
-    # ICAI structure: .container.mx-3 -> ul -> li -> a
     posts = page.locator("div.container.mx-3 a").all()
-    
-    # Limit to first 15 posts to save time (we run hourly)
-    for i, post in enumerate(posts[:15]):
+    for post in posts[:15]:
         try:
             url = post.get_attribute("href")
             title = post.inner_text().strip()
             full_url = urljoin(source['url'], url)
+            date_obj = extract_date(title)
             
-            # ICAI lists usually don't have dates in the main list text
-            # We must visit the page to get the date accurately or check the tooltip
-            
-            date_obj = None
-            # Quick visit to the notice page to get real date
-            try:
-                # Open in new tab or just navigate? Navigation is safer for state.
-                # However, for speed, let's extract date from text if possible, 
-                # otherwise treat as None (which is allowed) [cite: 3]
-                date_obj = extract_date(title)
-            except:
-                pass
-
             candidates.append({
                 "url": full_url,
                 "title": title,
@@ -228,14 +210,11 @@ def scrape_icai(page, source):
             })
         except:
             continue
-            
     return candidates
 
 def post_to_discord(item):
-    """Formats and sends the embed."""
     src = item['source']
     
-    # Logic for description [cite: 8, 9, 10]
     if src["exam"] == "IMPORTANT":
         desc = "🚨 **ICAI posted a new important announcement!**"
     elif src["exam"] == "ANNOUNCEMENT":
@@ -243,48 +222,41 @@ def post_to_discord(item):
     elif src["org"] == "ICAI":
         desc = f"**ICAI posted a circular for {src['exam']}!**"
     else:
-        # NTA Logic
         desc = f"**NTA posted a circular for {src['exam']}!**"
 
     embed = {
         "title": item['title'],
         "url": item['url'],
         "description": desc,
-        "color": 5793266, # Green-ish
+        "color": 5793266,
         "footer": {
             "text": "Examination Update"
         }
     }
 
-    # Add date to footer if available [cite: 5]
     if item['date']:
         embed["footer"]["text"] += f" • Published: {item['date'].strftime('%d-%m-%Y')}"
     else:
         embed["footer"]["text"] += " • Date: Not specified"
 
-    payload = {
-        "content": "@everyone", # [cite: 6]
-        "embeds": [embed]
-    }
-
     try:
-        requests.post(DISCORD_WEBHOOK, json=payload)
+        requests.post(DISCORD_WEBHOOK, json={"content": "@everyone", "embeds": [embed]})
     except Exception as e:
-        print(f"Failed to send Discord webhook: {e}")
+        print(f"Failed to send webhook: {e}")
 
 def main():
     if not DISCORD_WEBHOOK:
-        raise RuntimeError("DISCORD_WEBHOOK is not set.")
+        raise RuntimeError("DISCORD_WEBHOOK not set")
 
     posted_urls = load_state()
+    print(f"Loaded {len(posted_urls)} previously posted URLs.")
+    
     all_candidates = []
 
     with sync_playwright() as p:
-        # Launch browser
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        # 1. Collect ALL candidates from ALL sources
         for source in SOURCES:
             if source['type'] == "NTA":
                 all_candidates.extend(scrape_nta(page, source))
@@ -293,57 +265,33 @@ def main():
         
         browser.close()
 
-    # 2. Filter & Clean Data
+    # Filter & Sort
     valid_items = []
     for item in all_candidates:
-        # Deduplication check
         if item['url'] in posted_urls:
             continue
         
-        # Baseline Check [cite: 5]
-        # If date exists, must be >= Baseline.
-        # If date is None, INCLUDE it[cite: 3].
-        if item['date']:
-            if item['date'] < BASELINE_START:
-                continue 
-        
+        # Baseline Logic: 
+        # If date exists and is OLDER than baseline -> Skip.
+        # If date is None -> Keep.
+        if item['date'] and item['date'] < BASELINE_START:
+            continue
+            
         valid_items.append(item)
 
-    # 3. Global Sort 
-    # Sort key: (Has Date?, Date Value). 
-    # Items with dates come first, sorted old->new. 
-    # Items without dates come last (or first, depending on preference, 
-    # but strictly sorting requires a comparable key).
-    # We map None to datetime.max to put them at the end, or min to put at start.
-    # Logic: Oldest date -> Newest date.
-    
-    def sort_key(x):
-        d = x['date']
-        if d is None:
-            # If no date, treat as "now" so it appends at the end?
-            # Or treat as very old? 
-            # Requirement: "Oldest first". 
-            # If we don't know the date, we can't sort it correctly relative to others.
-            # We will append them at the end to ensure they are seen.
-            return datetime.max 
-        return d
+    # Sort: Oldest -> Newest (None dates at end)
+    valid_items.sort(key=lambda x: (x['date'] is None, x['date'] or datetime.max))
 
-    valid_items.sort(key=sort_key)
-
-    # 4. Post and Save
-    new_posted_count = 0
+    new_count = 0
     for item in valid_items:
-        # Double check duplicate before posting (in case of dupes in source list)
-        if item['url'] in posted_urls:
-            continue
-
-        print(f"Posting: {item['title']}")
-        post_to_discord(item)
-        posted_urls.append(item['url'])
-        new_posted_count += 1
-        
+        if item['url'] not in posted_urls:
+            print(f"Posting: {item['title']}")
+            post_to_discord(item)
+            posted_urls.append(item['url'])
+            new_count += 1
+            
     save_state(posted_urls)
-    print(f"Run complete. Posted {new_posted_count} new updates.")
+    print(f"Done. Posted {new_count} updates.")
 
 if __name__ == "__main__":
     main()
