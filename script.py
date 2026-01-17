@@ -100,12 +100,12 @@ def fetch_pdfs(src):
 
         # JEE Public Notices
         sections.append(
-            soup.select_one("div#1648447930282-deb48cc0-95ec")
+            soup.find("div", {"id": "1648447930282-deb48cc0-95ec"})
         )
 
         # NEET Public Notices
         sections.append(
-            soup.select_one("div#1648449005032-46466f25-2ebe")
+            soup.find("div", {"id": "1648449005032-46466f25-2ebe"})
         )
 
         # Information dropdown content
