@@ -13,6 +13,10 @@ STATE_FILE = "posted.json"
 
 BASELINE_START = datetime(2025, 10, 1)
 
+if date:
+    if date < BASELINE:
+        continue
+
 SOURCES = {
     "JEE Main": {
         "url": "https://jeemain.nta.nic.in/Downloads/",
@@ -87,45 +91,70 @@ def clean_title_from_url(url):
         .strip()
     )
 
+def extract_date_from_text(text):
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(text[-11:], fmt)
+        except:
+            pass
+    return None
 
 def fetch_pdfs(src):
     collected = []
-    visited_pages = set()
 
-    def crawl(url):
-        if url in visited_pages:
+    r = requests.get(src["url"], timeout=20)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    def extract(section):
+        if not section:
             return
-        visited_pages.add(url)
+        for a in section.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
+            pdf_url = urljoin(src["url"], a["href"])
+            title = a.get_text(" ", strip=True) or clean_title_from_url(pdf_url)
 
-        try:
+            # try to find date in nearby text
+            text = a.parent.get_text(" ", strip=True)
+            date = extract_date_from_text(text)
+
+            collected.append((pdf_url, title, date))
+
+    # -------- NTA --------
+    if src["org"] == "NTA":
+        if "jeemain" in src["url"]:
+            extract(soup.find("div", id="1648447930282-deb48cc0-95ec"))
+        if "neet" in src["url"]:
+            extract(soup.find("div", id="1648449005032-46466f25-2ebe"))
+
+        extract(soup.find("li", id="menu-item-6563"))
+
+    # -------- ICAI --------
+    if src["org"] == "ICAI":
+        page = 1
+        while True:
+            url = src["url"] if page == 1 else src["url"].rstrip("/") + f"/page/{page}/"
             r = requests.get(url, timeout=20)
-        except:
-            return
+            if r.status_code != 200:
+                break
 
-        soup = BeautifulSoup(r.text, "html.parser")
+            soup = BeautifulSoup(r.text, "html.parser")
+            container = soup.select_one("div.container.mx-3")
+            if not container:
+                break
 
-        # collect PDFs on this page
-        for a in soup.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
-            pdf_url = urljoin(url, a["href"])
-            title = a.get_text(strip=True) or clean_title_from_url(pdf_url)
-            collected.append((pdf_url, title, None))
+            found = False
+            for a in container.select("a[href$='.pdf']"):
+                found = True
+                pdf_url = urljoin(url, a["href"])
+                title = a.get_text(" ", strip=True) or clean_title_from_url(pdf_url)
 
-        # follow internal notice/info links (NTA)
-        if src["org"] == "NTA":
-            for a in soup.select("a[href]"):
-                href = a["href"]
-                if any(x in href.lower() for x in ["notice", "information", "public"]):
-                    full = urljoin(url, href)
-                    if src["url"] in full:
-                        crawl(full)
+                text = a.parent.get_text(" ", strip=True)
+                date = extract_date_from_text(text)
 
-        # ICAI pagination
-        if src["org"] == "ICAI":
-            next_page = soup.select_one("a.next.page-numbers")
-            if next_page:
-                crawl(next_page["href"])
+                collected.append((pdf_url, title, date))
 
-    crawl(src["url"])
+            if not found:
+                break
+            page += 1
 
     # de-duplicate
     seen = set()
