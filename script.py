@@ -89,94 +89,51 @@ def clean_title_from_url(url):
 
 
 def fetch_pdfs(src):
-    all_pdfs = []
+    collected = []
+    visited_pages = set()
 
-    # ---------- NTA: JEE / NEET ----------
-    if src["org"] == "NTA":
-        r = requests.get(src["url"], timeout=20)
-        soup = BeautifulSoup(r.text, "html.parser")
+    def crawl(url):
+        if url in visited_pages:
+            return
+        visited_pages.add(url)
 
-        sections = []
-
-        # JEE Public Notices
-        sections.append(
-            soup.find("div", {"id": "1648447930282-deb48cc0-95ec"})
-        )
-
-        # NEET Public Notices
-        sections.append(
-            soup.find("div", {"id": "1648449005032-46466f25-2ebe"})
-        )
-
-        # Information dropdown content
-        info_menu = soup.select_one("li#menu-item-6563")
-        if info_menu:
-            sections.append(info_menu)
-
-        for section in sections:
-            if not section:
-                continue
-
-            for a in section.select("a[href$='.pdf']"):
-                pdf_url = urljoin(src["url"], a["href"])
-                title = a.get_text(strip=True)
-                if not title:
-                    title = clean_title_from_url(pdf_url)
-
-                all_pdfs.append((pdf_url, title, None))
-
-        return list(dict.fromkeys(all_pdfs))  # de-dup, preserve order
-
-    # ---------- ICAI (paginated) ----------
-    page = 1
-    while True:
-        url = src["url"]
-        if page > 1:
-            url = url.rstrip("/") + f"/page/{page}/"
-
-        r = requests.get(url, timeout=20)
-        if r.status_code != 200:
-            break
+        try:
+            r = requests.get(url, timeout=20)
+        except:
+            return
 
         soup = BeautifulSoup(r.text, "html.parser")
-        container = soup.select_one("div.container.mx-3")
-        if not container:
-            break
 
-        found = False
-
-        for a in container.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
-            found = True
+        # collect PDFs on this page
+        for a in soup.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
             pdf_url = urljoin(url, a["href"])
-            title = a.get_text(strip=True)
-            if not title:
-                title = clean_title_from_url(pdf_url)
+            title = a.get_text(strip=True) or clean_title_from_url(pdf_url)
+            collected.append((pdf_url, title, None))
 
-            date = None
-            try:
-                head = requests.head(pdf_url, timeout=10)
-                lm = head.headers.get("Last-Modified")
-                if lm:
-                    date = datetime.strptime(
-                        lm, "%a, %d %b %Y %H:%M:%S %Z"
-                    )
-            except:
-                pass
+        # follow internal notice/info links (NTA)
+        if src["org"] == "NTA":
+            for a in soup.select("a[href]"):
+                href = a["href"]
+                if any(x in href.lower() for x in ["notice", "information", "public"]):
+                    full = urljoin(url, href)
+                    if src["url"] in full:
+                        crawl(full)
 
-            all_pdfs.append((pdf_url, title, date))
+        # ICAI pagination
+        if src["org"] == "ICAI":
+            next_page = soup.select_one("a.next.page-numbers")
+            if next_page:
+                crawl(next_page["href"])
 
-        if not found:
-            break
-
-        page += 1
+    crawl(src["url"])
 
     # de-duplicate
     seen = set()
     unique = []
-    for item in all_pdfs:
-        if item[0] not in seen:
-            seen.add(item[0])
-            unique.append(item)
+    for u, t, d in collected:
+        if u not in seen:
+            seen.add(u)
+            unique.append((u, t, d))
 
     return unique
 
