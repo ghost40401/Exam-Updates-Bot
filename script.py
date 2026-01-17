@@ -62,17 +62,16 @@ SOURCES = {
 
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"posted": {}, "baseline_done": False}
+        return {"posted": {}, "baseline_done": {}}
 
     with open(STATE_FILE) as f:
         data = json.load(f)
 
-    if "posted" not in data:
-        return {"posted": data, "baseline_done": False}
-
-    state.setdefault("baseline_done", {})
+    data.setdefault("posted", {})
+    data.setdefault("baseline_done", {})
 
     return data
+
 
 
 def save_state(state):
@@ -106,7 +105,13 @@ def fetch_pdfs(src):
         soup = BeautifulSoup(r.text, "html.parser")
         found_any = False
 
-        for a in soup.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
+        for a in soup.select(
+            "a[href$='.pdf'], "
+            "a[href*='/wp-content/uploads/'], "
+            "a[href*='PublicNotice'], "
+            "a[href*='public-notice']"
+        ):
+
             found_any = True
             pdf_url = urljoin(url, a["href"])
             title = a.get_text(strip=True)
@@ -171,32 +176,32 @@ def send_embed(src, title, url, date):
 
 def main():
     state = load_state()
-
-    BASELINE_LIMIT = 5  # per source
     
     for name, src in SOURCES.items():
-        state["posted"].setdefault(name, [])
+    state["posted"].setdefault(name, [])
 
-        pdfs = fetch_pdfs(src)
-        pdfs.sort(key=lambda x: x[2] or datetime.min)
-        
-        baseline_batch = pdfs[-BASELINE_LIMIT:]
-        
-        for url, title, date in pdfs:
-            if not state["baseline_done"].get(name, False):
-                if (url, title, date) not in baseline_batch:
-                    state["posted"][name].append(url)
-                    continue
-            else:
-                if url in state["posted"][name]:
-                    continue
-                    
-            send_embed(src, title, url, date)
-            state["posted"][name].append(url)
+    pdfs = fetch_pdfs(src)
 
+    # sort by date (old → new)
+    pdfs.sort(key=lambda x: x[2] or datetime.min)
+
+    for url, title, date in pdfs:
+        if url in state["posted"][name]:
+            continue
+
+        # baseline run → only January 2026 PDFs
+        if not state["baseline_done"].get(name, False):
+            if not date:
+                continue
+            if date.year != BASELINE_YEAR or date.month != BASELINE_MONTH:
+                continue
+
+        send_embed(src, title, url, date)
+        state["posted"][name].append(url)
+
+    # mark baseline done per source
     state["baseline_done"][name] = True
 
-    state["baseline_done"] = True
     save_state(state)
 
 
