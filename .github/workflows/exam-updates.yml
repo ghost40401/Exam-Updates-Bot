@@ -2,27 +2,38 @@ name: Exam Updates
 
 on:
   schedule:
-    - cron: '0 * * * *'  # every hour
-  workflow_dispatch:
+    - cron: '0 * * * *'  # Runs every hour
+  workflow_dispatch:      # Allows manual trigger
 
 jobs:
-  run-script:
+  scrape-and-post:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # REQUIRED to commit changes
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.11
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4
-      - name: Cache posted.json
-        uses: actions/cache@v3
-        with:
-          path: posted.json
-          key: posted-json
+          python-version: '3.11'
 
-      - name: Run script
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+
+      - name: Run Scraper
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: python script.py
+
+      - name: Commit and Push State
+        # Only run if posted.json changed
+        run: |
+          git config --global user.name "ExamUpdateBot"
+          git config --global user.email "bot@example.com"
+          git add posted.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update posted state [skip ci]" && git push)
