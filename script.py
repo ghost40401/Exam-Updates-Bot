@@ -11,6 +11,8 @@ if not DISCORD_WEBHOOK:
 
 STATE_FILE = "posted.json"
 
+BASELINE_START = datetime(2025, 10, 1)
+
 SOURCES = {
     "JEE Main": {
         "url": "https://jeemain.nta.nic.in/Downloads/",
