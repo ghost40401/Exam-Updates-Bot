@@ -95,35 +95,64 @@ def extract_date_from_text(text):
             pass
     return None
 
+
 def fetch_pdfs(src):
-    collected = []
+    results = []
 
-    r = requests.get(src["url"], timeout=20)
-    soup = BeautifulSoup(r.text, "html.parser")
+    def parse_notice_page(notice_url):
+        try:
+            r = requests.get(notice_url, timeout=20)
+        except:
+            return []
 
-    def extract(section):
-        if not section:
-            return
-        for a in section.select("a[href$='.pdf'], a[href*='/wp-content/uploads/']"):
-            pdf_url = urljoin(src["url"], a["href"])
-            title = a.get_text(" ", strip=True) or clean_title_from_url(pdf_url)
+        soup = BeautifulSoup(r.text, "html.parser")
 
-            # try to find date in nearby text
-            text = a.parent.get_text(" ", strip=True)
+        # ---- extract date ----
+        date = None
+        time_tag = soup.find("time")
+        if time_tag:
+            try:
+                date = datetime.strptime(time_tag.get_text(strip=True), "%d %B %Y")
+            except:
+                pass
+
+        # fallback: look for date text
+        if not date:
+            text = soup.get_text(" ", strip=True)
             date = extract_date_from_text(text)
 
-            collected.append((pdf_url, title, date))
+        found = []
+        for a in soup.select("a[href$='.pdf']"):
+            pdf_url = urljoin(notice_url, a["href"])
+            title = a.get_text(strip=True) or clean_title_from_url(pdf_url)
+            found.append((pdf_url, title, date))
 
-    # -------- NTA --------
+        return found
+
+    # ---------------- NTA ----------------
     if src["org"] == "NTA":
+        r = requests.get(src["url"], timeout=20)
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        sections = []
         if "jeemain" in src["url"]:
-            extract(soup.find("div", id="1648447930282-deb48cc0-95ec"))
+            sections.append(soup.find("div", id="1648447930282-deb48cc0-95ec"))
         if "neet" in src["url"]:
-            extract(soup.find("div", id="1648449005032-46466f25-2ebe"))
+            sections.append(soup.find("div", id="1648449005032-46466f25-2ebe"))
 
-        extract(soup.find("li", id="menu-item-6563"))
+        for sec in sections:
+            if not sec:
+                continue
+            for a in sec.select("a[href]"):
+                notice_url = urljoin(src["url"], a["href"])
+                results.extend(parse_notice_page(notice_url))
 
-    # -------- ICAI --------
+        info_menu = soup.find("li", id="menu-item-6563")
+        if info_menu:
+            for a in info_menu.select("a[href]"):
+                results.extend(parse_notice_page(urljoin(src["url"], a["href"])))
+
+    # ---------------- ICAI ----------------
     if src["org"] == "ICAI":
         page = 1
         while True:
@@ -133,28 +162,20 @@ def fetch_pdfs(src):
                 break
 
             soup = BeautifulSoup(r.text, "html.parser")
-            container = soup.select_one("div.container.mx-3")
-            if not container:
+            posts = soup.select("div.container.mx-3 a[href]")
+            if not posts:
                 break
 
-            found = False
-            for a in container.select("a[href$='.pdf']"):
-                found = True
-                pdf_url = urljoin(url, a["href"])
-                title = a.get_text(" ", strip=True) or clean_title_from_url(pdf_url)
-                text = a.parent.get_text(" ", strip=True)
-                date = extract_date_from_text(text)
+            for a in posts:
+                post_url = urljoin(url, a["href"])
+                results.extend(parse_notice_page(post_url))
 
-                collected.append((pdf_url, title, date))
-
-            if not found:
-                break
             page += 1
 
-    # de-duplicate
+    # ---- deduplicate ----
     seen = set()
     unique = []
-    for u, t, d in collected:
+    for u, t, d in results:
         if u not in seen:
             seen.add(u)
             unique.append((u, t, d))
