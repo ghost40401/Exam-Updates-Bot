@@ -240,7 +240,7 @@ def post_to_discord(item):
         embed["footer"]["text"] += " • Date: Not specified"
 
     try:
-        requests.post(DISCORD_WEBHOOK, json={"content": "@everyone", "embeds": [embed]})
+        requests.post(DISCORD_WEBHOOK, json={"content": "everyone", "embeds": [embed]})  # type @ beside everyone
     except Exception as e:
         print(f"Failed to send webhook: {e}")
 
