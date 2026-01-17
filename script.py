@@ -11,8 +11,7 @@ if not DISCORD_WEBHOOK:
 
 STATE_FILE = "posted.json"
 
-BASELINE_YEAR = 2026
-BASELINE_MONTH = 1
+BASELINE_START = datetime(2025, 10, 1)
 
 SOURCES = {
     "JEE Main": {
@@ -171,7 +170,14 @@ def send_embed(src, title, url, date):
             "text": f"Published: {date.strftime('%d-%m-%Y')}"
         }
 
-    requests.post(DISCORD_WEBHOOK, json={"embeds": [embed]})
+    requests.post(
+        DISCORD_WEBHOOK,
+        json={
+            "content": "@everyone",
+            "embeds": [embed]
+        }
+    )
+
 
 
 def main():
@@ -187,12 +193,11 @@ def main():
             if url in state["posted"][name]:
                 continue
 
-            # baseline run → only January 2026 PDFs
+            # baseline run → Oct 2025 onwards PDFs
             if not state["baseline_done"].get(name, False):
-                if not date:
+                if date and date < BASELINE_START:
                     continue
-                if date.year != BASELINE_YEAR or date.month != BASELINE_MONTH:
-                    continue
+
     
             send_embed(src, title, url, date)
             state["posted"][name].append(url)
