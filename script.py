@@ -179,33 +179,42 @@ def send_embed(src, title, url, date):
     )
 
 
-
 def main():
     state = load_state()
-    
+    state["posted"].setdefault("_global", [])
+
+    ALL_PDFS = []
+
+    # 1️⃣ Collect everything first
     for name, src in SOURCES.items():
-        state["posted"].setdefault(name, [])
         pdfs = fetch_pdfs(src)
-        # sort by date (old → new)
-        pdfs.sort(key=lambda x: x[2] or datetime.min)
-
         for url, title, date in pdfs:
-            if url in state["posted"][name]:
+            if url in state["posted"]["_global"]:
                 continue
+            ALL_PDFS.append((url, title, date, src))
 
-            # baseline run → Oct 2025 onwards PDFs
-            if not state["baseline_done"].get(name, False):
-                if date and date < BASELINE_START:
-                    continue
+    # 2️⃣ Apply baseline rule
+    BASELINE_START = datetime(2025, 10, 1)
 
-    
-            send_embed(src, title, url, date)
-            state["posted"][name].append(url)
+    BASELINE_PDFS = []
+    for url, title, date, src in ALL_PDFS:
+        if date is None:
+            BASELINE_PDFS.append((url, title, date, src))
+        elif date >= BASELINE_START:
+            BASELINE_PDFS.append((url, title, date, src))
 
-        # mark baseline done per source
-        state["baseline_done"][name] = True
+    # 3️⃣ Global sort (oldest → newest, no-date first)
+    BASELINE_PDFS.sort(
+        key=lambda x: (x[2] is not None, x[2] or datetime.min)
+    )
+
+    # 4️⃣ Post in strict global order
+    for url, title, date, src in BASELINE_PDFS:
+        send_embed(src, title, url, date)
+        state["posted"]["_global"].append(url)
 
     save_state(state)
+
 
 
 if __name__ == "__main__":
