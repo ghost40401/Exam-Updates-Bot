@@ -223,10 +223,9 @@ def post_to_discord(item):
         desc = "🚨 **ICAI posted a new important announcement!**"
     elif src["exam"] == "ANNOUNCEMENT":
         desc = "📢 **ICAI posted a new announcement!**"
-    elif src["org"] == "ICAI":
-        desc = f"**ICAI posted a circular for {src['exam']}!**"
-    else:
-        desc = f"**NTA posted a circular for {src['exam']}!**"
+    else src["org"] == "ICAI":
+        desc = f"{src['emoji']} **{src['org']} posted a circular for "
+        f"{src['exam']}!**"
 
     embed = {
         "title": item['title'],
