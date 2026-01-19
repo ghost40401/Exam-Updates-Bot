@@ -19,7 +19,6 @@ SOURCES = [
         "exam": "JEE MAIN",
         "emoji": "🧪",
         "type": "NTA",
-        # FIX 1: Use attribute selector for IDs starting with numbers
         "selector": "div[id='1648447930282-deb48cc0-95ec']",
         "menu_id": "li[id='menu-item-6563']"
     },
@@ -30,7 +29,6 @@ SOURCES = [
         "exam": "NEET",
         "emoji": "🩺",
         "type": "NTA",
-        # FIX 1: Use attribute selector for IDs starting with numbers
         "selector": "div[id='1648449005032-46466f25-2ebe']",
         "menu_id": "li[id='menu-item-6563']"
     },
@@ -84,12 +82,15 @@ def load_state():
         with open(STATE_FILE, "r") as f:
             data = json.load(f)
             
-            # FIX 2: Handle legacy dictionary format
+            # Legacy Dictionary Format
             if isinstance(data, dict):
-                # Extract the old global list if it exists, or return empty
-                return data.get("posted", {}).get("_global", [])
+                # Safety: Ensure 'posted' exists and is a dict
+                posted = data.get("posted")
+                if isinstance(posted, dict):
+                    return posted.get("_global", [])
+                return []
             
-            # If it's already a list (new format), return it
+            # New List Format
             if isinstance(data, list):
                 return data
                 
@@ -105,17 +106,21 @@ def save_state(posted_urls):
 def extract_date(text):
     if not text:
         return None
+    # Enhanced patterns to catch (DD-MM-YYYY) and other variations
     patterns = [
-        (r'\d{2}-\d{2}-\d{4}', "%d-%m-%Y"),
-        (r'\d{2}/\d{2}/\d{4}', "%d/%m/%Y"),
-        (r'\d{1,2}\s+[A-Za-z]+\s+\d{4}', "%d %B %Y"),
-        (r'\d{1,2}\s+[A-Za-z]{3}\s+\d{4}', "%d %b %Y")
+        (r'\(\d{2}-\d{2}-\d{4}\)', "%d-%m-%Y"),  # (04-12-2025)
+        (r'\(\d{2}/\d{2}/\d{4}\)', "%d/%m/%Y"),  # (04/12/2025)
+        (r'\d{2}-\d{2}-\d{4}', "%d-%m-%Y"),      # 04-12-2025
+        (r'\d{2}/\d{2}/\d{4}', "%d/%m/%Y"),      # 04/12/2025
+        (r'\d{1,2}\s+[A-Za-z]+\s+\d{4}', "%d %B %Y"), # 4 December 2025
+        (r'\d{1,2}\s+[A-Za-z]{3}\s+\d{4}', "%d %b %Y") # 4 Dec 2025
     ]
     for pat, fmt in patterns:
         match = re.search(pat, text)
         if match:
+            clean_str = match.group(0).replace('(', '').replace(')', '').strip()
             try:
-                return datetime.strptime(match.group(0), fmt)
+                return datetime.strptime(clean_str, fmt)
             except ValueError:
                 continue
     return None
@@ -123,13 +128,19 @@ def extract_date(text):
 def process_link(link_element, source, candidates_list):
     try:
         url_suffix = link_element.get_attribute("href")
-        if not url_suffix:
+        text = link_element.inner_text().strip()
+        
+        if not url_suffix or not text:
             return
 
-        text = link_element.inner_text().strip()
+        # Noise Filter: Skip breadcrumbs and nav links
+        noise_words = ["home", "students", "announcements", "contact", "sitemap"]
+        if text.lower() in noise_words:
+            return
+
         full_url = urljoin(source['url'], url_suffix)
         
-        if "javascript" in full_url.lower() or not text:
+        if "javascript" in full_url.lower():
             return
 
         date_obj = extract_date(text)
@@ -148,7 +159,8 @@ def scrape_nta(page, source):
     print(f"[{source['name']}] Navigating...")
     
     try:
-        page.goto(source['url'], timeout=60000)
+        # Increase timeout to 90s for slow NTA servers
+        page.goto(source['url'], timeout=90000, wait_until='domcontentloaded')
     except Exception as e:
         print(f"Error loading {source['name']}: {e}")
         return []
@@ -167,7 +179,6 @@ def scrape_nta(page, source):
     if source.get('menu_id'):
         try:
             menu_selector = source['menu_id']
-            # Wait for menu to be attached
             page.wait_for_selector(menu_selector, state="attached", timeout=10000)
             menu_item = page.locator(menu_selector)
             
@@ -175,7 +186,7 @@ def scrape_nta(page, source):
                 try:
                     menu_item.hover(timeout=5000)
                 except:
-                    pass # Continue even if hover acts up (sometimes items exist without hover)
+                    pass 
 
                 dropdown_links = menu_item.locator("a").all()
                 for link in dropdown_links:
@@ -189,25 +200,18 @@ def scrape_icai(page, source):
     candidates = []
     print(f"[{source['name']}] Navigating...")
     try:
-        page.goto(source['url'], timeout=60000)
-        page.wait_for_selector("div.container.mx-3", timeout=30000)
+        page.goto(source['url'], timeout=90000)
+        # Narrow selector to list items to reduce noise
+        page.wait_for_selector("div.container.mx-3 li a", timeout=30000)
     except:
         return []
 
-    posts = page.locator("div.container.mx-3 a").all()
-    for post in posts[:15]:
+    # REMOVE LIMIT: Scan all links to ensure we hit Oct 2025
+    posts = page.locator("div.container.mx-3 li a").all()
+    
+    for post in posts:
         try:
-            url = post.get_attribute("href")
-            title = post.inner_text().strip()
-            full_url = urljoin(source['url'], url)
-            date_obj = extract_date(title)
-            
-            candidates.append({
-                "url": full_url,
-                "title": title,
-                "date": date_obj,
-                "source": source
-            })
+            process_link(post, source, candidates)
         except:
             continue
     return candidates
@@ -240,7 +244,7 @@ def post_to_discord(item):
         embed["footer"]["text"] += " • Date: Not specified"
 
     try:
-        requests.post(DISCORD_WEBHOOK, json={"content": "@everyone", "embeds": [embed]})  # type @ beside everyone
+        requests.post(DISCORD_WEBHOOK, json={"content": "@everyone", "embeds": [embed]}) 
     except Exception as e:
         print(f"Failed to send webhook: {e}")
 
@@ -254,8 +258,12 @@ def main():
     all_candidates = []
 
     with sync_playwright() as p:
+        # User-Agent is critical for NTA websites
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        )
+        page = context.new_page()
 
         for source in SOURCES:
             if source['type'] == "NTA":
@@ -267,13 +275,17 @@ def main():
 
     # Filter & Sort
     valid_items = []
+    seen_urls = set()
+    
     for item in all_candidates:
         if item['url'] in posted_urls:
             continue
+        if item['url'] in seen_urls:
+            continue
+        
+        seen_urls.add(item['url'])
         
         # Baseline Logic: 
-        # If date exists and is OLDER than baseline -> Skip.
-        # If date is None -> Keep.
         if item['date'] and item['date'] < BASELINE_START:
             continue
             
