@@ -17,7 +17,7 @@ SOURCES = [
         "url": "https://jeemain.nta.nic.in/",
         "org": "NTA",
         "exam": "JEE MAIN",
-        "emoji": "🧪",
+        "emoji": "🪛",
         "type": "NTA",
         "selector": "div[id='1648447930282-deb48cc0-95ec']",
         "menu_id": "li[id='menu-item-6563']"
