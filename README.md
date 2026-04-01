@@ -12,4 +12,4 @@ The bot monitors all circulars, notices, and notifications (including exam dates
 * ICAI (Announcements, Foundation, Intermediate, and Final)
 
 ### Preview
-![Exam Updates Bot in action](https://github.com/user-attachments/assets/2f89721b-d99b-4178-8d6f-5953017b0d02)
+![Exam Updates Bot in action](./assets/preview.png)
