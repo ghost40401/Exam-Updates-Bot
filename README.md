@@ -1,3 +1,4 @@
+<h1>Exam Updates Bot</h1>
 This bot fetches latest circulars and notices from JEE-MAIN, NEET-UG, and ICAI websites and then sends it to my discord server through discord webhook.
 <br><br>
 Example: <br>
