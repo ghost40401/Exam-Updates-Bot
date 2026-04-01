@@ -9,7 +9,7 @@ The bot is written in Python and uses Playwright to scrape the circulars and not
 The bot monitors all circulars, notices, and notifications (including exam dates, registration windows, admit card releases, and results) across the following portals:
 * NTA NEET UG
 * NTA JEE Main
-* ICAI (BOS, Foundation, Intermediate, and Final)
+* ICAI (Announcements, Foundation, Intermediate, and Final)
 
 ### Preview
 ![Exam Updates Bot in action](https://github.com/user-attachments/assets/2f89721b-d99b-4178-8d6f-5953017b0d02)
