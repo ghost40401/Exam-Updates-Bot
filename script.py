@@ -221,13 +221,16 @@ def post_to_discord(item):
     
     if src["exam"] == "IMPORTANT":
         desc = "🚨 **ICAI posted a new important announcement!**"
+        msg_text = "@everyone New important announcement from ICAI!"
     elif src["exam"] == "ANNOUNCEMENT":
         desc = "📢 **ICAI posted a new announcement!**"
+        msg_text = "@everyone New announcement from ICAI!"
     else: 
         desc = (
-            f"{src['emoji']} **{src['org']} posted a circular for "
+            f"{src['emoji']} **{src['org']} posted an update for "
             f"{src['exam']}!**"
         )
+        msg_text = f"@everyone New update for {src['exam']}!"
 
     embed = {
         "title": item['title'],
@@ -235,7 +238,7 @@ def post_to_discord(item):
         "description": desc,
         "color": 5793266,
         "footer": {
-            "text": "Examination Update"
+            "text": "Official Notification"
         }
     }
 
@@ -245,7 +248,7 @@ def post_to_discord(item):
         embed["footer"]["text"] += " • Date: Not specified"
 
     try:
-        requests.post(DISCORD_WEBHOOK, json={"content": f"@everyone **New circular for {src['type']} {src['exam']}!**", "embeds": [embed]}) 
+        requests.post(DISCORD_WEBHOOK, json={"content": msg_text, "embeds": [embed]}) 
     except Exception as e:
         print(f"Failed to send webhook: {e}")
 
